@@ -172,8 +172,12 @@ document.addEventListener('DOMContentLoaded', () => {
   
   if (dashboardBtn) {
     dashboardBtn.addEventListener('click', (e) => {
-      console.log('Dashboard clicked - stopping recording');
+      console.log('Dashboard clicked - stopping recording and refreshing');
       showDashboard(true); // Stop recording when user manually clicks Dashboard
+      // Force refresh dashboard data
+      setTimeout(() => {
+        loadDashboardInPopup();
+      }, 50);
     });
   }
   
@@ -235,7 +239,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const saveBtn = document.getElementById('save');
   if (saveBtn) {
     saveBtn.addEventListener('click', async () => {
-      console.log('Save clicked');
+      console.log('Save clicked - stopping recording and saving');
+      
+      // First, stop the recording if it's active
+      const res = await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'getEvents' });
+      if (res && res.ok && res.recording) {
+        console.log('Stopping active recording before save');
+        await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'stop' });
+        
+        // Also notify background script
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'BACKGROUND_CONTROL',
+            action: 'stopRecording'
+          });
+        } catch (error) {
+          console.warn('Failed to notify background script of stop:', error);
+        }
+      }
+      
       const nameInput = document.getElementById('recName');
       const name = nameInput ? nameInput.value.trim() : '';
       const thumb = await captureThumb();
@@ -271,8 +293,16 @@ document.addEventListener('DOMContentLoaded', () => {
           meta: { id: recId, name: recName, savedAt: Date.now(), thumb: thumb || null } 
         };
         
+        console.log('About to save recording:', recId, recName);
+        console.log('Recording object:', recordings[recId]);
+        console.log('All recordings before save:', Object.keys(recordings));
+        
         await chrome.storage.local.set({ altera_recordings: recordings });
-        console.log('Saved recording:', recId, recName);
+        console.log('Successfully saved recording:', recId, recName);
+        
+        // Verify it was saved
+        const verification = await chrome.storage.local.get(['altera_recordings']);
+        console.log('Verification - recordings in storage:', Object.keys(verification.altera_recordings || {}));
         
         // Toast feedback
         const toast = document.getElementById('toast');
@@ -282,8 +312,16 @@ document.addEventListener('DOMContentLoaded', () => {
           setTimeout(() => { toast.style.display = 'none'; }, 1200);
         }
         
-        // Switch to dashboard
+        // Update UI to show recording stopped
+        refresh();
+        
+        // Switch to dashboard and force refresh
         showDashboard();
+        
+        // Force reload dashboard data after a brief delay to ensure storage is written
+        setTimeout(() => {
+          loadDashboardInPopup();
+        }, 100);
         
       } catch (e) {
         console.error('Save failed:', e);
@@ -380,14 +418,20 @@ function renderTimeline(events) {
 
 // Dashboard-in-popup
 async function loadDashboardInPopup() {
+  console.log('Loading dashboard data...');
   const { altera_recordings: recordings = {} } = await chrome.storage.local.get(['altera_recordings']);
-  console.log('Storage data:', recordings);
+  console.log('Raw storage data:', recordings);
+  console.log('Storage keys:', Object.keys(recordings));
   const list = document.getElementById('dbList');
   const count = document.getElementById('dbCount');
+  if (!list || !count) {
+    console.error('Dashboard elements not found:', { list, count });
+    return;
+  }
   list.innerHTML = '';
   const values = Object.values(recordings);
   count.textContent = `${values.length} recording${values.length === 1 ? '' : 's'}`;
-  console.log('Found recordings:', values);
+  console.log('Found recordings:', values.length, values);
   for (const r of values) {
     const card = document.createElement('div');
     card.className = 'thumb';
@@ -472,8 +516,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Check if currently recording to decide which view to show
   const checkRecording = async () => {
-    const res = await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'getEvents' });
-    if (res && res.ok && res.recording) {
+    // First check with background script for global state
+    let isRecording = false;
+    try {
+      const bgResponse = await chrome.runtime.sendMessage({
+        type: 'BACKGROUND_CONTROL',
+        action: 'getRecordingState'
+      });
+      if (bgResponse && bgResponse.ok) {
+        isRecording = bgResponse.recording;
+        console.log('Background script reports recording state:', isRecording);
+      }
+    } catch (error) {
+      console.warn('Failed to get state from background script:', error);
+    }
+    
+    // Fallback to content script check
+    if (!isRecording) {
+      const res = await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'getEvents' });
+      if (res && res.ok && res.recording) {
+        isRecording = true;
+        console.log('Content script reports recording in progress');
+      }
+    }
+    
+    if (isRecording) {
       // If recording, show recorder view
       console.log('Recording in progress, showing recorder view');
       showRecorder(false); // Don't clear state

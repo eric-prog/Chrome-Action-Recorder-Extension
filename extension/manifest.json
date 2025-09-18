@@ -3,8 +3,11 @@
   "name": "Altera Action Recorder",
   "version": "0.1.0",
   "description": "Record and download browser interaction traces for replay.",
-  "permissions": ["activeTab", "tabs", "debugger", "scripting", "storage", "downloads"],
+  "permissions": ["activeTab", "tabs", "debugger", "scripting", "storage", "downloads", "webNavigation"],
   "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "Recorder",
     "default_popup": "popup.html"

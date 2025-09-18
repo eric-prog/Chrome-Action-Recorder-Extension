@@ -270,15 +270,39 @@
     isRecording = true;
     currentRecordingId = `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     await chrome.storage.local.set({ [STORAGE_KEYS.sessionId]: currentRecordingId, [STORAGE_KEYS.events]: [] });
+    
+    // Notify background script
+    try {
+      await chrome.runtime.sendMessage({ 
+        type: 'BACKGROUND_CONTROL', 
+        action: 'startRecording' 
+      });
+    } catch (error) {
+      console.warn('Failed to notify background script of recording start:', error);
+    }
+    
     attachListeners();
     recordViewport();
     recordNavigation('start');
+    console.log('Recording started with ID:', currentRecordingId);
   }
 
-  function stopRecording() {
+  async function stopRecording() {
     if (!isRecording) return;
     isRecording = false;
     detachListeners();
+    
+    // Notify background script
+    try {
+      await chrome.runtime.sendMessage({ 
+        type: 'BACKGROUND_CONTROL', 
+        action: 'stopRecording' 
+      });
+    } catch (error) {
+      console.warn('Failed to notify background script of recording stop:', error);
+    }
+    
+    console.log('Recording stopped');
     // Do not auto-save; user controls saving via popup
   }
 
@@ -309,7 +333,15 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== 'RECORDER_CONTROL') return;
     const { action } = message;
-    if (action === 'start') {
+    if (action === 'ping') {
+      sendResponse({ ok: true, status: 'content script ready' });
+    } else if (action === 'syncState') {
+      // Synchronize state with background script
+      syncRecordingFlag().then(() => {
+        sendResponse({ ok: true, recording: isRecording });
+      });
+      return true;
+    } else if (action === 'start') {
       chrome.storage.local.set({ [STORAGE_KEYS.recording]: true }).then(startRecording);
       sendResponse({ ok: true });
     } else if (action === 'stop') {
