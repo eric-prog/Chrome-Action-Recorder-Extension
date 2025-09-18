@@ -137,9 +137,11 @@ function showRecorder(clearState = false) {
       console.log('Cleared name input');
     }
     if (dropdown) {
+      dropdown.innerHTML = '<option value="">-- New Recording --</option>';
       dropdown.value = '';
-      dropdown.selectedIndex = -1;
-      console.log('Cleared dropdown');
+      dropdown.selectedIndex = 0;
+      dropdown.disabled = true; // Disable dropdown for new recordings
+      console.log('Cleared and disabled dropdown for new recording');
     }
     if (eventsTextarea) {
       eventsTextarea.value = '';
@@ -153,11 +155,18 @@ function showRecorder(clearState = false) {
     
     // Also clear the current events from storage for this session
     chrome.storage.local.set({ altera_recorder_events: [] });
-    console.log('Cleared storage events for new recording');
+    // Clear temp name for truly fresh start
+    chrome.storage.local.remove(['altera_temp_name']);
+    console.log('Cleared storage events and temp name for new recording');
   }
   
   // Refresh recorder state when switching in (but not if we just cleared)
   if (!clearState) {
+    // Re-enable dropdown when not clearing state
+    const dropdown = document.getElementById('recList');
+    if (dropdown) {
+      dropdown.disabled = false;
+    }
     try { refresh(); } catch (_) {}
   }
   try {
@@ -166,6 +175,22 @@ function showRecorder(clearState = false) {
   } catch (_) {}
 }
 document.addEventListener('DOMContentLoaded', () => {
+  // Save recording name as user types
+  const nameInput = document.getElementById('recName');
+  if (nameInput) {
+    // Restore saved name on load
+    chrome.storage.local.get(['altera_temp_name'], (result) => {
+      if (result.altera_temp_name) {
+        nameInput.value = result.altera_temp_name;
+      }
+    });
+    
+    // Save name as user types
+    nameInput.addEventListener('input', () => {
+      chrome.storage.local.set({ altera_temp_name: nameInput.value });
+    });
+  }
+  
   // Tab navigation buttons
   const dashboardBtn = document.getElementById('btnDashboard');
   const recorderBtn = document.getElementById('btnRecorder');
@@ -205,24 +230,36 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function refreshRecordingList() {
-  const res = await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'listRecordings' });
   const sel = document.getElementById('recList');
-  if (sel) sel.innerHTML = '';
+  if (!sel) return;
+  
+  // Don't refresh if dropdown is disabled (New Recording mode)
+  if (sel.disabled) {
+    console.log('Skipping recording list refresh - in New Recording mode');
+    return;
+  }
+  
+  const res = await sendToActiveTab({ type: 'RECORDER_CONTROL', action: 'listRecordings' });
+  sel.innerHTML = '';
+  
+  // Add empty option first to prevent auto-selection
+  const emptyOpt = document.createElement('option');
+  emptyOpt.value = '';
+  emptyOpt.textContent = '-- Select Recording --';
+  sel.appendChild(emptyOpt);
+  
   if (res && res.ok) {
     const items = res.items || [];
-    if (items.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'No recordings yet';
-      sel.appendChild(opt);
-    }
     for (const meta of items) {
       const opt = document.createElement('option');
       opt.value = meta.id;
       opt.textContent = meta.name;
-      if (sel) sel.appendChild(opt);
+      sel.appendChild(opt);
     }
   }
+  
+  // Ensure no recording is selected by default
+  sel.selectedIndex = 0;
 }
 
 async function captureThumb() {
@@ -269,18 +306,20 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Events to save:', events);
         const recordings = keys['altera_recordings'] || {};
         
-        // Check if we're updating an existing recording (from dropdown)
+        // Always create new recording when saving from active recording session
+        // Only update existing if explicitly loaded from dropdown AND not currently recording
         const dropdown = document.getElementById('recList');
         const existingId = dropdown ? dropdown.value : null;
+        const isCurrentlyRecording = res && res.ok && res.recording;
         
         let recId, recName;
-        if (existingId && recordings[existingId]) {
-          // Update existing recording
+        if (existingId && recordings[existingId] && !isCurrentlyRecording) {
+          // Update existing recording (only if not currently recording)
           recId = existingId;
           recName = name || recordings[existingId].name || `Recording ${new Date().toLocaleString()}`;
           console.log('Updating existing recording:', recId);
         } else {
-          // Create new recording
+          // Create new recording (default behavior, especially when recording)
           recId = `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           recName = name || `Recording ${new Date().toLocaleString()}`;
           console.log('Creating new recording:', recId);
@@ -299,6 +338,15 @@ document.addEventListener('DOMContentLoaded', () => {
         
         await chrome.storage.local.set({ altera_recordings: recordings });
         console.log('Successfully saved recording:', recId, recName);
+        
+        // Clear the temporary name since we saved successfully
+        await chrome.storage.local.remove(['altera_temp_name']);
+        
+        // Clear the name input
+        const nameInput = document.getElementById('recName');
+        if (nameInput) {
+          nameInput.value = '';
+        }
         
         // Verify it was saved
         const verification = await chrome.storage.local.get(['altera_recordings']);
@@ -459,18 +507,40 @@ async function loadDashboardInPopup() {
     btnLoad.onclick = async () => {
       console.log('Open clicked for recording:', r.id, r);
       try {
+        // Switch to recorder view first
+        showRecorder();
+        
         // Load from storage directly since we have the data
         const events = r.events || [];
         console.log('Events to load:', events);
+        
+        // Set up UI for editing existing recording
+        const nameInput = document.getElementById('recName');
+        const dropdown = document.getElementById('recList');
         const eventsTextarea = document.getElementById('events');
+        
+        // Set the recording name
+        if (nameInput) {
+          nameInput.value = r.name || r.id;
+          console.log('Set name input to:', r.name || r.id);
+        }
+        
+        // Enable dropdown and select this recording
+        if (dropdown) {
+          dropdown.disabled = false;
+          dropdown.value = r.id;
+          console.log('Selected recording in dropdown:', r.id);
+        }
+        
+        // Set events
         if (eventsTextarea) {
           eventsTextarea.value = JSON.stringify(events, null, 2);
           console.log('Set textarea value');
         } else {
           console.error('Events textarea not found');
         }
+        
         renderTimeline(events);
-        showRecorder();
         console.log('Loaded recording with', events.length, 'events');
       } catch (err) {
         console.error('Failed to open recording:', err);
