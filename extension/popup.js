@@ -306,23 +306,37 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Events to save:', events);
         const recordings = keys['altera_recordings'] || {};
         
+        console.log('CRITICAL DEBUG - Retrieved from storage:');
+        console.log('  Raw altera_recordings:', keys['altera_recordings']);
+        console.log('  Recordings object:', recordings);
+        console.log('  Existing recording IDs:', Object.keys(recordings));
+        console.log('  Number of existing recordings:', Object.keys(recordings).length);
+        
         // Always create new recording when saving from active recording session
         // Only update existing if explicitly loaded from dropdown AND not currently recording
         const dropdown = document.getElementById('recList');
-        const existingId = dropdown ? dropdown.value : null;
+        const existingId = dropdown && dropdown.value && dropdown.value.trim() ? dropdown.value.trim() : null;
         const isCurrentlyRecording = res && res.ok && res.recording;
+        const isNewRecordingMode = dropdown && dropdown.disabled;
+        
+        console.log('Save logic debug:');
+        console.log('  dropdown.value:', dropdown ? dropdown.value : 'no dropdown');
+        console.log('  dropdown.disabled:', dropdown ? dropdown.disabled : 'no dropdown');
+        console.log('  existingId:', existingId);
+        console.log('  isCurrentlyRecording:', isCurrentlyRecording);
+        console.log('  isNewRecordingMode:', isNewRecordingMode);
         
         let recId, recName;
-        if (existingId && recordings[existingId] && !isCurrentlyRecording) {
-          // Update existing recording (only if not currently recording)
+        if (existingId && recordings[existingId] && !isCurrentlyRecording && !isNewRecordingMode) {
+          // Update existing recording (only if not currently recording AND not in new recording mode)
           recId = existingId;
           recName = name || recordings[existingId].name || `Recording ${new Date().toLocaleString()}`;
-          console.log('Updating existing recording:', recId);
+          console.log('UPDATING existing recording:', recId);
         } else {
-          // Create new recording (default behavior, especially when recording)
+          // Create new recording (default behavior, especially when recording or in new recording mode)
           recId = `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           recName = name || `Recording ${new Date().toLocaleString()}`;
-          console.log('Creating new recording:', recId);
+          console.log('CREATING new recording:', recId);
         }
         
         recordings[recId] = { 
