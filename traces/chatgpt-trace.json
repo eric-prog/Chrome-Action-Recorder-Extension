@@ -1,0 +1,18 @@
+[
+  {
+    "type": "viewport",
+    "timestamp": 0,
+    "page": {"url": "about:blank", "title": ""},
+    "width": 1280,
+    "height": 800
+  },
+  {
+    "type": "navigate",
+    "timestamp": 1,
+    "page": {"url": "about:blank", "title": ""},
+    "url": "https://chatgpt.com",
+    "kind": "start"
+  }
+]
+
+

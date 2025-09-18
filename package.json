@@ -1,0 +1,15 @@
+{
+  "name": "altera-recorder-takehome",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "replay": "node replay/replay.js",
+    "replay:trace": "node replay/replay.js traces/chatgpt-trace.json",
+    "install:browsers": "npx playwright install --with-deps",
+    "test:smoke": "node -e \"console.log('ok')\""
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
